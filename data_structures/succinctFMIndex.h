@@ -55,6 +55,14 @@ public:
 
 	}
 
+	pair<ulint, ulint> arrayC( uchar j ) {
+		 return idxBWT.arrayC(j);
+	}
+
+	IndexedBWT* get_idxBWTPtr(){
+		return &idxBWT;
+	}
+
 	ulint size(){//returns size of the structure in bits
 
 		return idxBWT.size();

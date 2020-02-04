@@ -165,6 +165,17 @@ public:
 
 	}
 
+	pair<ulint, ulint> arrayC( uchar j ) {
+		 ulint c = remapping[j];
+
+		 pair<ulint, ulint> interval = pair<ulint, ulint> (0, n);
+
+		 interval.first = FIRST[c] + rank(c, interval.first);
+		 interval.second = FIRST[c] + rank(c, interval.second);
+
+		 return interval;
+	}
+
 	ulint convertToTextCoordinate(ulint i){//i=address on BWT (F column). returns corresponding address on text
 
 		ulint l = 0;//number of LF steps
@@ -266,6 +277,31 @@ public:
 			interval.second = FIRST[c] + rank(c,interval.second);
 
 		}
+
+		return interval;
+
+	}
+
+
+	/*
+	 * 	EXACT backward search: search pattern P and return interval <lower_included, upper_excluded> on the BWT
+	 *
+	 */
+	pair<ulint, ulint> exact_match(uchar c, ulint l, ulint r){
+
+		pair<ulint, ulint> interval;
+
+			if(c==0){
+				cout << "ERROR while searching pattern in the index: the pattern contains a 0x0 byte (not allowed since it is used as text terminator).\n";
+				exit(0);
+			}
+
+			c = remapping[c];//apply remapping
+
+			interval.first = FIRST[c] + rank(c,l);
+			interval.second = FIRST[c] + rank(c,r);
+
+
 
 		return interval;
 
