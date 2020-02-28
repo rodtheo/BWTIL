@@ -54,8 +54,8 @@ struct aln_entry_t {
   ulint L;
   ulint U;
   ulint next_p;
-	uint32_t num_mm:8, num_gapo:8, num_snps:8;
-	uint32_t score:8, state:8, aln_length:8;
+	uint32_t num_mm, num_gapo, num_snps;
+	uint32_t score, state, aln_length;
   uchar c;
   uchar b;
 	//uint8_t score; // aln score so far
@@ -143,6 +143,13 @@ int main(int argc,char** argv) {
 		pattern = string(argv[3]);
 	}
 
+  int k_seed;
+  int debug = 1;
+
+  if(mode==lz){
+    k_seed = atoi(argv[3]);
+  }
+
     auto t1 = high_resolution_clock::now();
 
 	succinctFMIndex SFMI;
@@ -180,6 +187,9 @@ int main(int argc,char** argv) {
 
 	if (mode==lz){
 
+    ofstream outfile;
+    outfile.open("out.txt");
+
 		cout << "Loading succinct FM-index from file " << in << endl;
 		SFMI = succinctFMIndex::loadFromFile(in);
 		cout << "Done." << endl;
@@ -209,17 +219,21 @@ int main(int argc,char** argv) {
     int diff_left, best_diff;
     uint32_t matches, max_diff;
 
-    cout << "###################################################" << endl;
-    cout << "INITIALIZING ALGORITHM" << endl;
-    cout << "###################################################\n\n" << endl;
-
+    if (debug){
+      cout << "###################################################" << endl;
+      cout << "INITIALIZING ALGORITHM" << endl;
+      cout << "###################################################\n\n" << endl;
+    }
     string s = "##";
     int nhashtags;
-
+    int allow_diff;
+    // int k_seed = 3;
 		while (i < (n-1)){
 
-      cout << "###################################################" << endl;
-      cout << " FOR i = " << i << endl;
+      if (debug){
+        cout << "###################################################" << endl;
+        cout << " FOR i = " << i << endl;
+      }
       nhashtags = 1;
 			// cout << (int)(n/10.) << endl;
 			// perc = (100*j)/n;
@@ -266,10 +280,14 @@ int main(int argc,char** argv) {
 
 			// while ((j + 1 < n) && (sp <= ep) && (max_Ar >= (n-(i+1)))){
       aln_entry_t a;
+
+      // allow_diff = 0;
       while (!heap.empty()){
 
         a = heap.top();
         heap.pop();
+
+        allow_diff = a.state;
 
         diff_left = max_diff - a.num_mm;
         sp = a.L;
@@ -281,37 +299,67 @@ int main(int argc,char** argv) {
 
         max_Ar = RMQ.query(sp, ep-1);
 
-        cout << "Pop i = " << a.i << " c=" << a.c << " and c =" << c << " , actual base = "<< a.b << ", max Ar=" << max_Ar << " p =" << a.next_p << " next c=" << idxBWT->at( a.next_p ) << ", LF(p)=" << p << "  j=" << a.num_snps <<", j new=" << a.i+a.aln_length << " aln len="<< matches << " iprime =" << a.num_gapo << " L=" << a.L << " U=" << a.U << endl;
+        if (debug){
+          cout << "Pop i = " << a.i << " c=" << a.c << " and c =" << c << " , actual base = "<< a.b << ", max Ar=" << max_Ar << " p =" << a.next_p << " next c=" << idxBWT->at( a.next_p ) << ", LF(p)=" << p << "  j=" << a.num_snps <<", j new=" << a.i+a.aln_length << " aln len="<< matches << " iprime =" << a.num_gapo << " L=" << a.L << " U=" << a.U << " num_mm = " << a.num_mm << endl;
 
-        if (diff_left < 0)
-          continue;
+          cout << "DUPLICATED Pop i + allow_diff = " << a.i + a.state << " allow_diff = " << a.state << " c=" << a.c << " and c =" << c << " , actual base = "<< a.b << ", max Ar=" << max_Ar << " p =" << a.next_p << " next c=" << idxBWT->at( a.next_p ) << ", LF(p)=" << p << "  j=" << a.num_snps <<", j new=" << a.i+a.aln_length+allow_diff << " aln len="<< matches << " iprime =" << a.num_gapo << " L=" << a.L << " U=" << a.U << " num_mm = " << a.num_mm << endl;
 
-        if (sp > (ep-1))
-          continue;
+          cout << "Allow diff = " << allow_diff << endl;
+        }
 
-        if (max_Ar < n-(i+1))
-          continue;
+        if (diff_left < 0){
+          if (debug){
+            cout << " INSIDE DIFF LEFT !!!" << endl;
+          }
+          continue;}
 
-        if (a.num_snps >= (n-1))
+        if (sp > (ep-1)){
+          if (debug){
+            cout << " INSIDE SP > (EP-1) !!!" << endl;
+          }
+          continue;}
+
+        if (max_Ar < n-(a.i+1)){
+          if (debug){
+          cout << " INSIDE THE MAX AR !!!" << endl;
+        }
           continue;
+        }
+
+        if (a.num_snps >= (n-1)){
+          if (debug){
+          cout << " INSIDE THE NUM SNPS !!! " << a.num_snps << endl;
+        }
+          // a.num_snps = j + a.num_mm;
+
+          // if (allow_diff >= k_seed){
+          //   j = a.num_snps;
+          // }
+          // j = j + 1;
+          continue;
+        }
 
         // cout << "## Pop i = " << a.i << " c=" << a.c << " and c =" << c << " , actual base = "<< a.b << " max Ar=" << max_Ar << " p =" << a.next_p << " next c=" << idxBWT->at( a.next_p ) << ", LF(p)=" << p << "  j=" << a.num_snps << " aln len="<< matches << " iprime =" << a.num_gapo << " L=" << a.L << " U=" << a.U << endl;
         nhashtags ++;
-        cout << repeat(s, a.aln_length+2) << " ALLOWING INNER MATCHES" << endl;
-
+        if (debug){
+          cout << repeat(s, a.aln_length+2) << " ALLOWING INNER MATCHES" << endl;
+        }
 				iprime = n - max_Ar;
         a.num_gapo = iprime;
         j = a.num_snps;
         // c = idxBWT->at( p );
         c = idxBWT->at( p );
-        cout << repeat(s, a.aln_length+2) << " IN c=" << c << " with iprime=" << iprime << " and i=" << a.i << ", p=" << p << endl;
+
+        if (debug){
+        cout << repeat(s, a.aln_length+2) << " IN c=" << c << " with iprime=" << iprime << " and i=" << a.i+allow_diff << ", p=" << p << endl;
+        }
         next_p =  a.next_p;
         // p = a.next_p;
 
-        uchar alphabet[] = {'G', 'O', 'L'};
-        struct query_bases_t qbases[3];
+        uchar alphabet[] = {'A', 'C', 'G', 'T'};
+        struct query_bases_t qbases[4];
 
-        for(int i=0; i < 3; i++){
+        for(int i=0; i < 4; i++){
           interval = idxBWT->exact_match( alphabet[i], a.L, a.U);
   				sp = interval.first;
   				ep = interval.second;
@@ -325,11 +373,18 @@ int main(int argc,char** argv) {
 
 				// j = j + 1;
         int is_mm;
-        int allow_diff = 1;
+        // int allow_diff = 1;
+        // allow_diff = allow_diff - a.num_mm;
+        cout << "PROXIMO ALLOW DIFF = " << allow_diff << endl;
 
-        if (allow_diff){
-            cout << repeat(s, a.aln_length+2) << " max Ar = " << max_Ar << " n-(i+1) = " << n-(a.i+1) << endl;
-            for(int i=0; i < 3; i++){
+        if (allow_diff > k_seed){
+
+          if (debug){
+            cout << repeat(s, a.aln_length+2) << "&&& BEGIN MISMATCH STYLE ALLOWED !!!" << endl;
+            cout << repeat(s, a.aln_length+2) << " max Ar = " << max_Ar << " n-(i+1) = " << n-(a.i+allow_diff+1) << " allow_diff =" << allow_diff << endl;
+
+          }
+            for(int i=0; i < 4; i++){
               if ((qbases[i].L < qbases[i].U) && (max_Ar >= n-(a.i+1))){
                 // cout << "AAAAQUI" << endl;
                 is_mm = 0;
@@ -338,21 +393,55 @@ int main(int argc,char** argv) {
                 }
 
                 if (is_mm == 0){
-                  cout << repeat(s, a.aln_length+2) << " Pushed base " << qbases[i].b << " with " << a.num_mm << " mis" << " L=" << qbases[i].L << " , U=" << qbases[i].U << " , maxAr=" << qbases[i].maxAr << endl;
+
+                  if (debug){
+                    cout << repeat(s, a.aln_length+2) << " Pushed base " << qbases[i].b << " with " << a.num_mm << " mis" << " L=" << qbases[i].L << " , U=" << qbases[i].U << " , maxAr=" << qbases[i].maxAr << "Allow_diff = " << allow_diff << endl;
+                  }
                   if (qbases[i].maxAr >= n-(a.i+1))
-                    heap.push(aln_entry_t(a.i, qbases[i].L, qbases[i].U, a.num_mm, (n-qbases[i].maxAr), p, a.state, j+1, a.aln_length+1, c, qbases[i].b));
+                    heap.push(aln_entry_t(a.i, qbases[i].L, qbases[i].U, a.num_mm, (n-qbases[i].maxAr), p, a.state+1, j+1, a.aln_length+1, c, qbases[i].b));
                 } else {
-                  cout << repeat(s, a.aln_length+2) << " Pushed base " << qbases[i].b << " with " << a.num_mm+1 << " mis" << " L=" << qbases[i].L << " , U=" << qbases[i].U << " , maxAr=" << qbases[i].maxAr << endl;
+
+                  if (debug){
+                    cout << repeat(s, a.aln_length+2) << " Pushed base " << qbases[i].b << " with " << a.num_mm+1 << " mis" << " L=" << qbases[i].L << " , U=" << qbases[i].U << " , maxAr=" << qbases[i].maxAr << endl;
+                  }
+
                   if (qbases[i].maxAr >= n-(a.i+1))
-                    heap.push(aln_entry_t(a.i, qbases[i].L, qbases[i].U, a.num_mm+1, (n-qbases[i].maxAr), p, a.state, j+1, a.aln_length+1, c, qbases[i].b ));
+                    heap.push(aln_entry_t(a.i, qbases[i].L, qbases[i].U, a.num_mm+1, (n-qbases[i].maxAr), p, 0, j+1, a.aln_length+1, c, qbases[i].b ));
                 }
 
               }
             }
 
+        if (debug){
+          cout << repeat(s, a.aln_length+2) << "&&& END MISMATCH STYLE ALLOWED !!!" << endl;
+        }
+        } else {
+          interval = idxBWT->exact_match( c, a.L, a.U);
+          sp = interval.first;
+          ep = interval.second;
+          ulint maxArm = RMQ.query(sp, ep-1);
+          // maxAr = RMQ.query(sp, ep-1);
+          if (debug){
+            cout << repeat(s, a.aln_length+2) << "BEFORE Pushed MATCHED base " << c << " with " << a.num_mm << " mis" << " L=" << sp << " , U=" << ep<< " , maxAr=" << maxArm << " max_Ar_ori=" << max_Ar << " n-(i+1) = " << n-(a.i+allow_diff+1) << endl;
+            cout << repeat(s, a.aln_length+2) << "@@ TESTING FOR n-(i+1) = " <<  n-(a.i+allow_diff+1) << " BUT " << allow_diff << endl;
+          }
+
+          if ( (sp < ep) && (maxArm >= n-(a.i+1)) ){
+          // if ( (sp < ep) && (maxArm >= (a.num_gapo+1)) ){
+            if (debug){
+              cout << repeat(s, a.aln_length+2) << " Pushed MATCHED base " << c << " with " << a.num_mm << " mis" << " L=" << sp << " , U=" << ep<< " , maxAr=" << maxArm << ", allow_diff=" << a.state+1 << " iprime = " << a.num_gapo << " n-(a.i+1) = " << n << endl;
+            }
+
+            heap.push(aln_entry_t(a.i, sp, ep, a.num_mm, (n-maxArm), p, a.state+1, j+1, a.aln_length+1, c, c ));
+            // allow_diff ++;
+            i ++;
+          }
         }
 
-        cout << repeat(s, a.aln_length) << " Heap SIZE = " << heap.size() << endl;
+
+        if (debug){
+          cout << repeat(s, a.aln_length) << " Heap SIZE = " << heap.size() << endl;
+        }
 
 				// perc = (100*j)/n;
 				// if (perc > last_perc and (perc%5)) {
@@ -375,20 +464,40 @@ int main(int argc,char** argv) {
 			}
 
       // j = j;
-      cout << "J final=" << j << endl;
+      if (debug){
+        cout << "J final=" << j << endl;
+      }
 
-			if (iprime - 1 == -1) {
-				cout << "(" << c << ")"<< endl;
+			if (a.num_gapo - 1 == -1) {
+				outfile << j << "\t" << c << "\t-\t-" <<endl;
+        cout << j << "\t" << c << "\t-\t-" <<endl;
 			} else {
 				// cout << "(" << iprime-(j-i) << "," << j-i-1 << ", " << c << ")" << endl;
-        cout << "(" << (a.num_gapo-(a.num_snps-a.i))-1 << "," << a.aln_length + 1 << ")" <<  endl;
+        if (debug){
+          cout << "c=" << a.b << " num_gapo (iprime) = " << a.num_gapo << ", num_snps = " << a.num_snps << " a.i = " << a.i << endl;
+        }
+
+        // if ( (a.num_gapo-(a.num_snps-a.i)) == 0) {
+        //   cout << "BIRL" << endl;
+        //   cout << "(" << (a.num_gapo-(a.num_snps-a.i)) << "," << a.aln_length + 1 << ")" <<  endl;
+        // }
+        // else {
+          if (a.num_mm > 0){
+                outfile << j << "\t" << ((a.num_gapo)-(a.num_snps-a.i))-1 << "\t" << a.aln_length + 1 << "\tM" <<  endl;
+                cout << j << "\t" << ((a.num_gapo)-(a.num_snps-a.i))-1 << "\t" << a.aln_length + 1 << "\tM" <<  endl;
+          } else {
+            outfile << j<< "\t" << ((a.num_gapo)-(a.num_snps-a.i))-1 << "\t" << a.aln_length + 1 << "\tN" << endl;
+            cout << j<< "\t" << ((a.num_gapo)-(a.num_snps-a.i))-1 << "\t" << a.aln_length + 1 << "\tN" << endl;
+          }
+        // }
 			}
 
+      a.state = 0;
 			i = j;
 
 		}
 
-
+    outfile.close();
 	}
 
 	printRSSstat();
