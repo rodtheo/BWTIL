@@ -144,15 +144,20 @@ int main(int argc,char** argv) {
 	}
 
   int k_seed;
-  int debug = 1;
+  int debug = 0;
+  string inS;
+
 
   if(mode==lz){
     k_seed = atoi(argv[3]);
+    inS = argv[4];
   }
 
     auto t1 = high_resolution_clock::now();
 
 	succinctFMIndex SFMI;
+  // RL
+  succinctFMIndex SFMI_S;
 
 	if(mode==build){
 
@@ -196,6 +201,10 @@ int main(int argc,char** argv) {
 		IndexedBWT* idxBWT = SFMI.get_idxBWTPtr();
 		RMaxQBlockDecomp RMQ(idxBWT);
 
+    // RLZ - start
+    SFMI_S = succinctFMIndex::loadFromFile(inS);
+    IndexedBWT* idxBWTS = SFMI_S.get_idxBWTPtr();
+
 		// vector<factor> enc;
 
 		ulint i = 0;
@@ -206,8 +215,14 @@ int main(int argc,char** argv) {
 		pair<ulint, ulint> interval;
 		ulint max_Ar_idx, max_Ar;
 		uint iprime;
-		ulint n = SFMI.textLength();
-    cout << "TEXT LENGTH = " << n << endl;
+    // LZ-parser - take the Text length
+		// ulint n = SFMI.textLength();
+    // RLZ-parser - take the Sample text length
+    ulint n = SFMI_S.textLength();
+    ulint nR = SFMI.textLength();
+    // RLZ-parser - END snippet
+
+    cout << "TEXT LENGTH = " << nR << endl;
 		ulint sp, ep;
     ulint next_p;
 		int perc, last_perc= -1;
@@ -230,12 +245,12 @@ int main(int argc,char** argv) {
 
     int ii, old_p;
     p = 1;
-    for(ii=0; ii <= n; ii++){
-      old_p = p;
-      c = idxBWT->at( p );
-      p = idxBWT->LF( p );
-      cout << "CHAR " << c << " int(CHAR) = " << int(c) << " WITH P = " << old_p <<", NEXT P = " << p << endl;
-    }
+    // for(ii=0; ii <= n; ii++){
+    //   old_p = p;
+    //   c = idxBWTS->at( p );
+    //   p = idxBWTS->LF( p );
+    //   cout << "CHAR " << c << " int(CHAR) = " << int(c) << " WITH P = " << old_p <<", NEXT P = " << p << endl;
+    // }
 
     // int ref_len = 13;
     // int k_seed = 3;
@@ -257,7 +272,7 @@ int main(int argc,char** argv) {
 
 
 
-			c = idxBWT->at( p );
+			c = idxBWTS->at( p );
 			// p = idxBWT->LF( p );
 
 			interval = SFMI.arrayC(c);
@@ -276,7 +291,7 @@ int main(int argc,char** argv) {
 
       best_score = aln_score(2, 2);
       best_diff = 2;
-      max_diff = 10;
+      max_diff = 1;
       num_best = 0;
       max_entries = 0;
 
@@ -306,7 +321,7 @@ int main(int argc,char** argv) {
         matches = a.aln_length;
 
         c = a.c;
-        p = idxBWT->LF( a.next_p );
+        p = idxBWTS->LF( a.next_p );
 
         max_Ar = RMQ.query(sp, ep-1);
 
@@ -332,14 +347,20 @@ int main(int argc,char** argv) {
           }
           continue;}
 
-        if (max_Ar < n-(a.i+1)){
+        // LZ
+        // if (max_Ar < n-(a.i+1)){
+        // RLZ
+        if (max_Ar < 0){
           if (debug){
           cout << " INSIDE THE MAX AR !!!" << endl;
         }
           continue;
         }
 
-        if (a.num_snps >= (n-1)){
+        // LZ
+        // if (a.num_snps >= (n-1)){
+        // RLZ
+        if (a.num_snps >= (n)){
           if (debug){
           cout << " INSIDE THE NUM SNPS !!! " << a.num_snps << endl;
         }
@@ -359,12 +380,13 @@ int main(int argc,char** argv) {
           continue;
         }
 
-        if (a.next_p == 1) {
-          if (debug){
-            cout << " CYCLING THROUGH BWT !! STOP BEFORE GETTING TO FIRST CHAR !!" << endl;
-          }
-          break;
-        }
+        // in RLZ we comment all the above code, up to the empty line
+        // if (a.next_p == 1) {
+        //   if (debug){
+        //     cout << " CYCLING THROUGH BWT !! STOP BEFORE GETTING TO FIRST CHAR !!" << endl;
+        //   }
+        //   break;
+        // }
 
         // cout << "## Pop i = " << a.i << " c=" << a.c << " and c =" << c << " , actual base = "<< a.b << " max Ar=" << max_Ar << " p =" << a.next_p << " next c=" << idxBWT->at( a.next_p ) << ", LF(p)=" << p << "  j=" << a.num_snps << " aln len="<< matches << " iprime =" << a.num_gapo << " L=" << a.L << " U=" << a.U << endl;
         nhashtags ++;
@@ -372,11 +394,18 @@ int main(int argc,char** argv) {
           // cout << repeat(s, a.aln_length+2) << " ALLOWING INNER MATCHES" << endl;
           cout << "## " << " ALLOWING INNER MATCHES" << endl;
         }
-				iprime = n - max_Ar;
+        // LZ - start
+				// iprime = n - max_Ar;
+        // LZ - end
+
+        // RLZ - begin
+        iprime = nR - max_Ar;
+        // RLZ - end
+
         a.num_gapo = iprime;
         j = a.num_snps;
         // c = idxBWT->at( p );
-        c = idxBWT->at( p );
+        c = idxBWTS->at( p );
 
         if ((int(c) == 0) || (int(c) == 36)){
           continue;
@@ -386,6 +415,7 @@ int main(int argc,char** argv) {
         // cout << repeat(s, a.aln_length+2) << " IN c=" << c << " with iprime=" << iprime << " and i=" << a.i+allow_diff << ", p=" << p << endl;
         cout << "### " << " IN c=" << c << " with iprime=" << iprime << " and i=" << a.i+allow_diff << ", p=" << p << endl;
         }
+
         next_p =  a.next_p;
         // p = a.next_p;
 
@@ -408,7 +438,7 @@ int main(int argc,char** argv) {
         int is_mm;
         // int allow_diff = 1;
         // allow_diff = allow_diff - a.num_mm;
-        cout << "PROXIMO ALLOW DIFF = " << allow_diff << endl;
+        // cout << "PROXIMO ALLOW DIFF = " << allow_diff << endl;
 
         if (allow_diff > k_seed){
 
@@ -420,16 +450,24 @@ int main(int argc,char** argv) {
             cout << "## "<< " max Ar = " << max_Ar << " n-(i+1) = " << n-(a.i+allow_diff+1) << " allow_diff =" << allow_diff << endl;
 
           }
+
             for(int i=0; i < 4; i++){
-		    if (debug) {
-			cout << "BEFORE CONDITION BEGIN" << endl;
-			// cout << repeat(s, a.aln_length+2) << " Pushed base " << qbases[i].b << " with " << a.num_mm << " mis" << " L=" << qbases[i].L << " , U=" << qbases[i].U << " , maxAr=" << qbases[i].maxAr << "Allow_diff = " << allow_diff << endl;
-      cout << "## " << " Pushed base " << qbases[i].b << " with " << a.num_mm << " mis" << " L=" << qbases[i].L << " , U=" << qbases[i].U << " , maxAr=" << qbases[i].maxAr << "Allow_diff = " << allow_diff << endl;
-			cout << "BEFORE CONDITION END" << endl;
-		    }
-              if ((qbases[i].L < qbases[i].U) && (max_Ar >= n-(a.i+1)) ){
-                cout << "AAAAQUI " << n-(a.i+1)<< endl;
+
+              if (debug) {
+            			cout << "BEFORE CONDITION BEGIN" << endl;
+            			// cout << repeat(s, a.aln_length+2) << " Pushed base " << qbases[i].b << " with " << a.num_mm << " mis" << " L=" << qbases[i].L << " , U=" << qbases[i].U << " , maxAr=" << qbases[i].maxAr << "Allow_diff = " << allow_diff << endl;
+                  cout << "## " << " Pushed base " << qbases[i].b << " with " << a.num_mm << " mis" << " L=" << qbases[i].L << " , U=" << qbases[i].U << " , maxAr=" << qbases[i].maxAr << "Allow_diff = " << allow_diff << endl;
+            			cout << "BEFORE CONDITION END" << endl;
+            		  }
+
+              // LZ
+              // if ((qbases[i].L < qbases[i].U) && (max_Ar >= n-(a.i+1)) ){
+              // RLZ
+              if ( (qbases[i].L < qbases[i].U) ){
+
+                // cout << "AAAAQUI " << n-(a.i+1)<< endl;
                 is_mm = 0;
+
                 if (c != qbases[i].b){
                   is_mm = 1;
                 }
@@ -440,8 +478,13 @@ int main(int argc,char** argv) {
                     // cout << repeat(s, a.aln_length+2) << " Pushed base " << qbases[i].b << " with " << a.num_mm << " mis" << " L=" << qbases[i].L << " , U=" << qbases[i].U << " , maxAr=" << qbases[i].maxAr << "Allow_diff = " << allow_diff << endl;
                     cout << "## " << " Pushed base " << qbases[i].b << " with " << a.num_mm << " mis" << " L=" << qbases[i].L << " , U=" << qbases[i].U << " , maxAr=" << qbases[i].maxAr << "Allow_diff = " <<  allow_diff << " max(n-(i+1), n-(ref_len+1)) = " << n-(a.i+1) << endl;
                   }
-                  if (qbases[i].maxAr >= n-(a.i+1))
-                    heap.push(aln_entry_t(a.i, qbases[i].L, qbases[i].U, a.num_mm, (n-qbases[i].maxAr), p, a.state+1, j+1, a.aln_length+1, c, qbases[i].b));
+
+                  // LZ
+                  // if (qbases[i].maxAr >= n-(a.i+1))
+                  // RLZ
+                  if (qbases[i].maxAr >= 0)
+                    heap.push(aln_entry_t(a.i, qbases[i].L, qbases[i].U, a.num_mm, (nR-qbases[i].maxAr), p, a.state+1, j+1, a.aln_length+1, c, qbases[i].b));
+
                 } else {
 
                   if (debug){
@@ -449,8 +492,11 @@ int main(int argc,char** argv) {
                     cout << "## " << " Pushed base " << qbases[i].b << " with " << a.num_mm+1 << " mis" << " L=" << qbases[i].L << " , U=" << qbases[i].U << " , maxAr=" << qbases[i].maxAr << " max(n-(i+1), n-(ref_len+1)) = " << std::max(n-(a.i+1), n-(13+1)) << endl;
                   }
 
-                  if (qbases[i].maxAr >= n-(a.i+1))
-                    heap.push(aln_entry_t(a.i, qbases[i].L, qbases[i].U, a.num_mm+1, (n-qbases[i].maxAr), p, 0, j+1, a.aln_length+1, c, qbases[i].b ));
+                  // LZ
+                  // if (qbases[i].maxAr >= n-(a.i+1))
+                  // RLZ
+                  if (qbases[i].maxAr >= 0)
+                    heap.push(aln_entry_t(a.i, qbases[i].L, qbases[i].U, a.num_mm+1, (nR-qbases[i].maxAr), p, 0, j+1, a.aln_length+1, c, qbases[i].b ));
                 }
 
               }
@@ -473,15 +519,18 @@ int main(int argc,char** argv) {
             cout << "## " << "BEFORE Pushed MATCHED base " << c << " with " << a.num_mm << " mis" << " L=" << sp << " , U=" << ep<< " , maxAr=" << maxArm << " max_Ar_ori=" << max_Ar << " n-(i+1) = " << n-(a.i+allow_diff+1) << endl;
             cout << "## " << "@@ TESTING FOR n-(i+1) = " <<  n-(a.i+allow_diff+1) << " BUT " << allow_diff << endl;
           }
+          // LZ
+          // if ( (sp < ep) && (maxArm >= n-(a.i+1)) ){
+          // RLZ
+          if ( (sp < ep) && (maxArm >= 0) ){
 
-          if ( (sp < ep) && (maxArm >= n-(a.i+1)) ){
           // if ( (sp < ep) && (maxArm >= (a.num_gapo+1)) ){
             if (debug){
               // cout << repeat(s, a.aln_length+2) << " Pushed MATCHED base " << c << " with " << a.num_mm << " mis" << " L=" << sp << " , U=" << ep<< " , maxAr=" << maxArm << ", allow_diff=" << a.state+1 << " iprime = " << a.num_gapo << " n-(a.i+1) = " << n << endl;
               cout << "## " << " Pushed MATCHED base " << c << " with " << a.num_mm << " mis" << " L=" << sp << " , U=" << ep<< " , maxAr=" << maxArm << ", allow_diff=" << a.state+1 << " iprime = " << a.num_gapo << " n-(a.i+1) = " << n << endl;
             }
 
-            heap.push(aln_entry_t(a.i, sp, ep, a.num_mm, (n-maxArm), p, a.state+1, j+1, a.aln_length+1, c, c ));
+            heap.push(aln_entry_t(a.i, sp, ep, a.num_mm, (nR-maxArm), p, a.state+1, j+1, a.aln_length+1, c, c ));
             // allow_diff ++;
             i ++;
           }
@@ -533,13 +582,13 @@ int main(int argc,char** argv) {
         // }
         // else {
           if (a.num_mm > 0){
-                outfile << j << "\t" << ((a.num_gapo)-(a.num_snps-a.i))-1 << "\t" << a.aln_length + 1 << "\tM" <<  endl;
+                outfile << j << "\t" << ((a.num_gapo)-(a.num_snps-a.i)) << "\t" << a.aln_length + 1 << "\tM" <<  endl;
 
-                cout << j << "\t" << ((a.num_gapo)-(a.num_snps-a.i))-1 << "\t" << a.aln_length + 1 << "\tM" <<  endl;
+                cout << j << "\t" << ((a.num_gapo)-(a.aln_length)) << "\t" << a.aln_length + 1 << "\tM" <<  endl;
           } else {
-            outfile << j<< "\t" << ((a.num_gapo)-(a.num_snps-a.i))-1 << "\t" << a.aln_length + 1 << "\tN" << endl;
+            outfile << j<< "\t" << ((a.num_gapo)-(a.num_snps-a.i)) << "\t" << a.aln_length + 1 << "\tN" << endl;
 
-            cout << j<< "\t" << ((a.num_gapo)-(a.num_snps-a.i))-1 << "\t" << a.aln_length + 1 << "\tN" << endl;
+            cout << j<< "\t" << ((a.num_gapo)-(a.aln_length)) << "\t" << a.aln_length + 1 << "\tN" << endl;
           }
         // }
 			}
