@@ -25,12 +25,174 @@
 #include <iostream>
 #include <queue>
 #include <string>
+#include <boost/heap/pairing_heap.hpp>
 
 #include "../../data_structures/succinctFMIndex.h"
 #include "../../data_structures/RMaxQBlockDecomp.h"
 
+// #include <sdsl/rmq_support.hpp>
+#include <sdsl/vectors.hpp>
+#include <sdsl/bit_vectors.hpp>
+#include <vector>
+
+#include <chrono>
+
 using namespace bwtil;
 using namespace std;
+using namespace sdsl;
+
+#include <string>
+#include <chrono>
+#include <algorithm>
+#include <fstream>
+
+#include <thread>
+
+struct ProfileResult
+{
+    std::string Name;
+    long long Start, End;
+};
+
+struct InstrumentationSession
+{
+    std::string Name;
+};
+
+class Instrumentor
+{
+private:
+    InstrumentationSession* m_CurrentSession;
+    std::ofstream m_OutputStream;
+    int m_ProfileCount;
+public:
+    Instrumentor()
+        : m_CurrentSession(nullptr), m_ProfileCount(0)
+    {
+    }
+
+    void BeginSession(const std::string& name, const std::string& filepath = "results.json")
+    {
+        m_OutputStream.open(filepath);
+        WriteHeader();
+        m_CurrentSession = new InstrumentationSession{ name };
+    }
+
+    void EndSession()
+    {
+        WriteFooter();
+        m_OutputStream.close();
+        delete m_CurrentSession;
+        m_CurrentSession = nullptr;
+        m_ProfileCount = 0;
+    }
+
+    void WriteProfile(const ProfileResult& result)
+    {
+        if (m_ProfileCount++ > 0)
+            m_OutputStream << ",";
+
+        std::string name = result.Name;
+        std::replace(name.begin(), name.end(), '"', '\'');
+
+        m_OutputStream << "{";
+        m_OutputStream << "\"cat\":\"function\",";
+        m_OutputStream << "\"dur\":" << (result.End - result.Start) << ',';
+        m_OutputStream << "\"name\":\"" << name << "\",";
+        m_OutputStream << "\"ph\":\"X\",";
+        m_OutputStream << "\"pid\":0,";
+        m_OutputStream << "\"tid\":0,";
+        m_OutputStream << "\"ts\":" << result.Start;
+        m_OutputStream << "}";
+
+        m_OutputStream.flush();
+    }
+
+    void WriteHeader()
+    {
+        // m_OutputStream << "{\"otherData\": {},\"traceEvents\":[";
+        m_OutputStream << "[";
+        m_OutputStream.flush();
+    }
+
+    void WriteFooter()
+    {
+        // m_OutputStream << "]}";
+        m_OutputStream << "]";
+        m_OutputStream.flush();
+    }
+
+    static Instrumentor& Get()
+    {
+        static Instrumentor instance;
+        return instance;
+    }
+};
+
+class InstrumentationTimer
+{
+public:
+    InstrumentationTimer(const char* name)
+        : m_Name(name), m_Stopped(false)
+    {
+        m_StartTimepoint = std::chrono::high_resolution_clock::now();
+    }
+
+    ~InstrumentationTimer()
+    {
+        if (!m_Stopped)
+            Stop();
+    }
+
+    void Stop()
+    {
+        auto endTimepoint = std::chrono::high_resolution_clock::now();
+
+        long long start = std::chrono::time_point_cast<std::chrono::nanoseconds>(m_StartTimepoint).time_since_epoch().count();
+        long long end = std::chrono::time_point_cast<std::chrono::nanoseconds>(endTimepoint).time_since_epoch().count();
+
+
+        if ((end - start) > 0){
+          Instrumentor::Get().WriteProfile({ m_Name, start, end});
+        }
+        m_Stopped = true;
+    }
+private:
+    const char* m_Name;
+    std::chrono::time_point<std::chrono::high_resolution_clock> m_StartTimepoint;
+    bool m_Stopped;
+};
+
+class Timer
+{
+public:
+  Timer()
+  {
+    m_StartTimepoint = std::chrono::high_resolution_clock::now();
+  }
+
+  ~Timer()
+  {
+    Stop();
+  }
+
+  void Stop()
+  {
+    auto endTimepoint = std::chrono::high_resolution_clock::now();
+
+    auto start = std::chrono::time_point_cast<std::chrono::nanoseconds>(m_StartTimepoint).time_since_epoch().count();
+
+    auto end = std::chrono::time_point_cast<std::chrono::nanoseconds>(endTimepoint).time_since_epoch().count();
+
+    auto duration = end - start;
+    double ms = duration * 0.001;
+
+    std::cout << duration << "us (" << ms << ")\n";
+
+  }
+private:
+  std::chrono::time_point< std::chrono::high_resolution_clock> m_StartTimepoint;
+};
 
 static inline int aln_score(const int m, const int o) {
 	// return m*p->mm_score + o*p->gapo_score + e*p->gape_score;
@@ -58,6 +220,8 @@ struct aln_entry_t {
 	uint32_t score, state, aln_length;
   uchar c;
   uchar b;
+  std::vector<int> mis_pos;
+  std::vector<char> mis_bases;
 	//uint8_t score; // aln score so far
 	//uint8_t i; // position in the read
 	//uint8_t num_mm;
@@ -75,6 +239,14 @@ struct aln_entry_t {
   aln_entry_t(){} // DEFAULT CONSTRUCTOR
 
   aln_entry_t(ulint i, ulint L, ulint U, uint32_t num_mm, uint32_t num_gapo, uint32_t next_p, uint32_t state, uint32_t num_snps, uint32_t aln_length, uchar& uu, uchar& uuu): i(i), L(L), U(U), num_mm(num_mm), num_gapo(num_gapo), next_p(next_p), state(state), num_snps(num_snps), aln_length(aln_length), c(uu), b(uuu)
+  {
+    mis_pos = {};
+    mis_bases = {};
+    // c = *uu;
+    // c = strcpy(c, uu);
+  }
+
+  aln_entry_t(ulint i, ulint L, ulint U, uint32_t num_mm, uint32_t num_gapo, uint32_t next_p, uint32_t state, uint32_t num_snps, uint32_t aln_length, uchar& uu, uchar& uuu, std::vector<int>& mis_pos, std::vector<char>& mis_bases): i(i), L(L), U(U), num_mm(num_mm), num_gapo(num_gapo), next_p(next_p), state(state), num_snps(num_snps), aln_length(aln_length), c(uu), b(uuu), mis_pos(mis_pos), mis_bases(mis_bases)
   {
     // c = *uu;
     // c = strcpy(c, uu);
@@ -101,6 +273,8 @@ string repeat(string s, int n)
 
     return s;
 }
+
+#define PROFILE_SCOPE(name) InstrumentationTimer timer##__LINE__(name)
 
 int main(int argc,char** argv) {
 
@@ -192,15 +366,22 @@ int main(int argc,char** argv) {
 
 	if (mode==lz){
 
+    Instrumentor::Get().BeginSession("Profile");
+
     ofstream outfile;
     outfile.open("out.txt");
 
 		cout << "Loading succinct FM-index from file " << in << endl;
 		SFMI = succinctFMIndex::loadFromFile(in);
 		cout << "Done." << endl;
-		IndexedBWT* idxBWT = SFMI.get_idxBWTPtr();
-		RMaxQBlockDecomp RMQ(idxBWT);
+		IndexedBWT* idxBWT;
+    cout << "Time SFMI pointer" << endl;
+    {
+        InstrumentationTimer timer("SFMI pointer");
+        idxBWT = SFMI.get_idxBWTPtr();
+    }
 
+    RMaxQBlockDecomp RMQ(idxBWT);
     // RLZ - start
     SFMI_S = succinctFMIndex::loadFromFile(inS);
     IndexedBWT* idxBWTS = SFMI_S.get_idxBWTPtr();
@@ -220,6 +401,18 @@ int main(int argc,char** argv) {
     // RLZ-parser - take the Sample text length
     ulint n = SFMI_S.textLength();
     ulint nR = SFMI.textLength();
+
+    bit_vector B(n,0);
+    bit_vector I(n,0);
+    // sd_vector<> B(bv);
+    std::vector<char> M;
+
+
+    int_vector<> vec(nR);
+    for (size_t i=0; i < nR; i++)
+      vec[i] = idxBWT->convertToTextCoordinate(i);
+
+    // rmq_succinct_sct<false> RMQ(&vec);
     // RLZ-parser - END snippet
 
     cout << "TEXT LENGTH = " << nR << endl;
@@ -251,10 +444,13 @@ int main(int argc,char** argv) {
     //   p = idxBWTS->LF( p );
     //   cout << "CHAR " << c << " int(CHAR) = " << int(c) << " WITH P = " << old_p <<", NEXT P = " << p << endl;
     // }
+    ulint track_len = 0;
+    I[0] = 1;
 
     // int ref_len = 13;
     // int k_seed = 3;
-		while (i < (n-1)){
+    // j = i + 1;
+		while (i < (n)){
 
       if (debug){
         cout << "###################################################" << endl;
@@ -271,27 +467,44 @@ int main(int argc,char** argv) {
 			j = i + 1;
 
 
-
-			c = idxBWTS->at( p );
+      {
+            InstrumentationTimer timer("idxBWTS_");
+			         c = idxBWTS->at( p );
+      }
 			// p = idxBWT->LF( p );
 
-			interval = SFMI.arrayC(c);
+      {
+            InstrumentationTimer timer("array_C");
+			       interval = SFMI.arrayC(c);
+      }
+
 			// cout << "LETTER =" << c << ", INTERVAL FIRST = " << interval.first << ", SA=" << idxBWT->convertToTextCoordinate(interval.first) << "| SECOND = " << interval.second << ", SA=" << idxBWT->convertToTextCoordinate(interval.second-1) << endl;
 			// cout << "RMQ[sp,ep] = " << RMQ.query(interval.first, interval.second-1) << endl;
 
 			sp = interval.first;
 			ep = interval.second;
 
-			max_Ar = RMQ.query(sp, ep-1);
+      {
+            InstrumentationTimer timer("RMQ");
+			         max_Ar = RMQ.query(sp, ep-1);
+      }
 			iprime = 0;
 
 			heap = priority_queue<aln_entry_t, vector<aln_entry_t>, CompareAlnScores>();
 
-			heap.push(aln_entry_t(i, sp, ep, 0, 0, p, 0, j, 0, c, c));
+      {
+            InstrumentationTimer timer("heap");
+			         heap.push(aln_entry_t(i, sp, ep, 0, 0, p, 0, j+1, 0, c, c));
+      }
+
+
+      // BEGIN - Add in 6 July of 2020
+      // j = i;
+      // END - Add in 6 July of 2020
 
       best_score = aln_score(2, 2);
       best_diff = 2;
-      max_diff = 1;
+      max_diff = 10;
       num_best = 0;
       max_entries = 0;
 
@@ -311,7 +524,10 @@ int main(int argc,char** argv) {
       while (!heap.empty()){
 
         a = heap.top();
-        heap.pop();
+        {
+              InstrumentationTimer timer("heap");
+              heap.pop();
+        }
 
         allow_diff = a.state;
 
@@ -321,9 +537,15 @@ int main(int argc,char** argv) {
         matches = a.aln_length;
 
         c = a.c;
-        p = idxBWTS->LF( a.next_p );
+        {
+              InstrumentationTimer timer("idxBWTS_LF");
+              p = idxBWTS->LF( a.next_p );
+        }
 
-        max_Ar = RMQ.query(sp, ep-1);
+        {
+              InstrumentationTimer timer("RMQ");
+              max_Ar = RMQ.query(sp, ep-1);
+        }
 
         if (debug){
           cout << "Pop i = " << a.i << " c=" << a.c << " and c =" << c << "int(c) =" << int(a.c) << " , actual base = "<< a.b << ", max Ar=" << max_Ar << " p =" << a.next_p << " next c=" << idxBWT->at( a.next_p ) << ", LF(p)=" << p << "  j=" << a.num_snps <<", j new=" << a.i+a.aln_length << " aln len="<< matches << " iprime =" << a.num_gapo << " L=" << a.L << " U=" << a.U << " num_mm = " << a.num_mm << " n-(a.i+1) =" << n-(a.i+1) << endl;
@@ -360,18 +582,21 @@ int main(int argc,char** argv) {
         // LZ
         // if (a.num_snps >= (n-1)){
         // RLZ
-        if (a.num_snps >= (n)){
-          if (debug){
-          cout << " INSIDE THE NUM SNPS !!! " << a.num_snps << endl;
-        }
-          // a.num_snps = j + a.num_mm;
 
-          // if (allow_diff >= k_seed){
-          //   j = a.num_snps;
-          // }
-          // j = j + 1;
-          continue;
-        }
+        // BEGIN - COMMENT ON 11 JULY
+        // if (a.num_snps >= (n)){
+        //   if (debug){
+        //   cout << " INSIDE THE NUM SNPS !!! " << a.num_snps << endl;
+        // }
+        //   // a.num_snps = j + a.num_mm;
+        //
+        //   // if (allow_diff >= k_seed){
+        //   //   j = a.num_snps;
+        //   // }
+        //   // j = j + 1;
+        //   continue;
+        // }
+        // END - COMMENT ON 11 JULY
 
         if ((int(a.c) == 36) || (int(a.c) == 0)){
           if (debug){
@@ -405,7 +630,10 @@ int main(int argc,char** argv) {
         a.num_gapo = iprime;
         j = a.num_snps;
         // c = idxBWT->at( p );
-        c = idxBWTS->at( p );
+        {
+              InstrumentationTimer timer("idxBWTS_");
+              c = idxBWTS->at( p );
+        }
 
         if ((int(c) == 0) || (int(c) == 36)){
           continue;
@@ -423,14 +651,20 @@ int main(int argc,char** argv) {
         struct query_bases_t qbases[4];
 
         for(int i=0; i < 4; i++){
-          interval = idxBWT->exact_match( alphabet[i], a.L, a.U);
+          {
+                InstrumentationTimer timer("idxBWT_exact");
+                interval = idxBWT->exact_match( alphabet[i], a.L, a.U);
+          }
   				sp = interval.first;
   				ep = interval.second;
 
           qbases[i].b = alphabet[i];
           qbases[i].L = sp;
           qbases[i].U = ep;
-          qbases[i].maxAr =RMQ.query(sp, ep-1);
+          {
+                InstrumentationTimer timer("RMQ");
+                qbases[i].maxAr =RMQ.query(sp, ep-1);
+          }
           // cout << "letter = " << alphabet[i] << " with L = " << sp << " and U = " << ep << " and max Ar=" <<   qbases[i].maxAr << endl;
         }
 
@@ -483,7 +717,10 @@ int main(int argc,char** argv) {
                   // if (qbases[i].maxAr >= n-(a.i+1))
                   // RLZ
                   if (qbases[i].maxAr >= 0)
-                    heap.push(aln_entry_t(a.i, qbases[i].L, qbases[i].U, a.num_mm, (nR-qbases[i].maxAr), p, a.state+1, j+1, a.aln_length+1, c, qbases[i].b));
+                  {
+                        InstrumentationTimer timer("heap");
+                        heap.push(aln_entry_t(a.i, qbases[i].L, qbases[i].U, a.num_mm, (nR-qbases[i].maxAr), p, a.state+1, j+1, a.aln_length+1, c, qbases[i].b, a.mis_pos, a.mis_bases));
+                      }
 
                 } else {
 
@@ -496,7 +733,23 @@ int main(int argc,char** argv) {
                   // if (qbases[i].maxAr >= n-(a.i+1))
                   // RLZ
                   if (qbases[i].maxAr >= 0)
-                    heap.push(aln_entry_t(a.i, qbases[i].L, qbases[i].U, a.num_mm+1, (nR-qbases[i].maxAr), p, 0, j+1, a.aln_length+1, c, qbases[i].b ));
+                  {
+                        InstrumentationTimer timer("heap");
+                    std::vector<int> new_;
+                    new_ = a.mis_pos;
+                    // new_.push_back(a.aln_length+1);
+                    new_.push_back(a.num_gapo);
+
+
+                    std::vector<char> newbase_;
+                    newbase_ = a.mis_bases;
+                    newbase_.push_back(c);
+
+                    cout << "HERE PUSHING " << a.aln_length+1 << " TO VEC indicating " << a.num_mm+1 << " mismatches" << endl;
+                    heap.push(aln_entry_t(a.i, qbases[i].L, qbases[i].U, a.num_mm+1, (nR-qbases[i].maxAr), p, 0, j+1, a.aln_length+1, c, qbases[i].b, new_, newbase_ ));
+                    for(int r=0; r < new_.size(); r++)
+                      cout << "-- IN CODE RETRIEVING " << new_[r] << " j = " << a.num_snps << endl;
+                  }
                 }
 
               }
@@ -507,10 +760,17 @@ int main(int argc,char** argv) {
           cout << "## " << "&&& END MISMATCH STYLE ALLOWED !!!" << endl;
         }
         } else {
-          interval = idxBWT->exact_match( c, a.L, a.U);
+          {
+                InstrumentationTimer timer("idxBWT_exact");
+                interval = idxBWT->exact_match( c, a.L, a.U);
+          }
           sp = interval.first;
           ep = interval.second;
-          ulint maxArm = RMQ.query(sp, ep-1);
+          ulint maxArm;
+          {
+                InstrumentationTimer timer("RMQ");
+                maxArm = RMQ.query(sp, ep-1);
+          }
           // maxAr = RMQ.query(sp, ep-1);
           if (debug){
             // cout << repeat(s, a.aln_length+2) << "BEFORE Pushed MATCHED base " << c << " with " << a.num_mm << " mis" << " L=" << sp << " , U=" << ep<< " , maxAr=" << maxArm << " max_Ar_ori=" << max_Ar << " n-(i+1) = " << n-(a.i+allow_diff+1) << endl;
@@ -530,9 +790,13 @@ int main(int argc,char** argv) {
               cout << "## " << " Pushed MATCHED base " << c << " with " << a.num_mm << " mis" << " L=" << sp << " , U=" << ep<< " , maxAr=" << maxArm << ", allow_diff=" << a.state+1 << " iprime = " << a.num_gapo << " n-(a.i+1) = " << n << endl;
             }
 
-            heap.push(aln_entry_t(a.i, sp, ep, a.num_mm, (nR-maxArm), p, a.state+1, j+1, a.aln_length+1, c, c ));
+            {
+                  InstrumentationTimer timer("heap");
+                  heap.push(aln_entry_t(a.i, sp, ep, a.num_mm, (nR-maxArm), p, a.state+1, j+1, a.aln_length+1, c, c , a.mis_pos,a.mis_bases));
+            }
             // allow_diff ++;
             i ++;
+
           }
         }
 
@@ -570,6 +834,10 @@ int main(int argc,char** argv) {
 			if (a.num_gapo - 1 == -1) {
 				outfile << j << "\t" << c << "\t-\t-" <<endl;
         cout << j << "\t" << c << "\t-\t-" <<endl;
+        // if (int(c)==36){
+        //   cout << "HERE $" << endl;
+        //   break;
+        // }
 			} else {
 				// cout << "(" << iprime-(j-i) << "," << j-i-1 << ", " << c << ")" << endl;
         if (debug){
@@ -582,13 +850,25 @@ int main(int argc,char** argv) {
         // }
         // else {
           if (a.num_mm > 0){
-                outfile << j << "\t" << ((a.num_gapo)-(a.num_snps-a.i)) << "\t" << a.aln_length + 1 << "\tM" <<  endl;
+                outfile << j << "\t" << ((a.num_gapo)-(a.num_snps-a.i)) + 1 << "\t" << a.aln_length + 1 << "\tM" <<  endl;
+                track_len += a.aln_length+1;
+                I[track_len] = 1;
+                for(int r=0; r < a.mis_pos.size(); r++){
+                    cout << "-- RETRIEVING " << a.mis_pos[r] << " = " << a.mis_bases[r] << " j = " << a.mis_pos[r] << endl;
+                    // B[a.mis_pos[r]+((a.num_gapo)-(a.num_snps-a.i))] = 1;
+                    B[a.mis_pos[r]] = 1;
+                    M.push_back(a.mis_bases[r]);
+                }
 
-                cout << j << "\t" << ((a.num_gapo)-(a.aln_length)) << "\t" << a.aln_length + 1 << "\tM" <<  endl;
+
+
+                // cout << j << "\t" << ((a.num_gapo)-(a.aln_length)) << "\t" << a.aln_length + 1 << "\tM" <<  endl;
           } else {
             outfile << j<< "\t" << ((a.num_gapo)-(a.num_snps-a.i)) << "\t" << a.aln_length + 1 << "\tN" << endl;
+            track_len += a.aln_length+1;
+            I[track_len] = 1;
 
-            cout << j<< "\t" << ((a.num_gapo)-(a.aln_length)) << "\t" << a.aln_length + 1 << "\tN" << endl;
+            // cout << j<< "\t" << ((a.num_gapo)-(a.aln_length)) << "\t" << a.aln_length + 1 << "\tN" << endl;
           }
         // }
 			}
@@ -599,8 +879,29 @@ int main(int argc,char** argv) {
 		}
 
     outfile.close();
+    I[n-1] = 0;
+    // cout << I << endl;
+    // cout << B << endl;
+    cout << M << endl;
+
+    sd_vector<> sdbI(I);
+    store_to_file(sdbI, "sdbI.sdsl");
+    ofstream outfileI;
+    outfileI.open("outI.txt");
+    outfileI << I;
+    outfileI.close();
+
+    sd_vector<> sdbB(B);
+    store_to_file(sdbB, "sdbB.sdsl");
+    ofstream outfileB;
+    outfileB.open("outB.txt");
+    outfileB << B;
+    outfileB.close();
+
+
 	}
 
+  Instrumentor::Get().EndSession();
 	printRSSstat();
 	auto t2 = high_resolution_clock::now();
 	ulint total = duration_cast<duration<double, std::ratio<1>>>(t2 - t1).count();
